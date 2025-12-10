@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KML Görüntüleyici ve Profesyonel Koordinat Dönüştürücü</title>
+    <!-- Tailwind CSS (Stil için) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS (Harita için) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Proj4js (Koordinat Dönüşümü için) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+    
+    <style>
+        #map {
+            height: 100%;
+            width: 100%;
+            z-index: 1;
+        }
+        .scroller::-webkit-scrollbar {
+            width: 8px;
+        }
+        .scroller::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        .scroller::-webkit-scrollbar-thumb {
+            background: #888; 
+            border-radius: 4px;
+        }
+        .scroller::-webkit-scrollbar-thumb:hover {
+            background: #555; 
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen flex flex-col font-sans overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-white shadow-md p-3 flex flex-col md:flex-row items-center justify-between z-10 shrink-0 border-b border-gray-200">
+        <div class="flex items-center gap-2 mb-2 md:mb-0">
+            <div class="bg-blue-600 text-white p-2 rounded-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 7m0 13V7m0 0L9.553 4.553A1 1 0 009 3.618C9 3.618 9 7 9 7" />
+                </svg>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold text-gray-800 leading-tight">KML Koordinat Okuyucu</h1>
+                <p class="text-xs text-gray-500">WGS84 / ED50 / UTM / TM Dönüştürücü</p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+            <label class="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition shadow-sm text-sm font-medium">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                <span>KML Yükle</span>
+                <input type="file" id="fileInput" accept=".kml" class="hidden" />
+            </label>
+            <span id="fileName" class="text-xs text-gray-500 italic max-w-[150px] truncate">Dosya seçilmedi</span>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+        
+        <!-- Map Panel -->
+        <div class="flex-1 relative bg-gray-200 border-r border-gray-300">
+            <div id="map"></div>
+            <div id="map-overlay" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none z-[1000]">
+                <div class="bg-white/90 backdrop-blur-sm p-6 rounded-xl shadow-lg border border-gray-200">
+                    <p class="text-gray-600 text-lg">Başlamak için bir KML dosyası yükleyin</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings & Data Panel -->
+        <div class="w-full md:w-[420px] bg-white flex flex-col shadow-xl z-20 shrink-0 h-2/3 md:h-auto border-t md:border-t-0 md:border-l border-gray-300">
+            
+            <!-- Projeksiyon Ayarları (Gelimiş) -->
+            <div class="p-4 bg-slate-50 border-b border-gray-200 space-y-3">
+                <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Projeksiyon Ayarları</h3>
+                
+                <div class="grid grid-cols-2 gap-2">
+                    <!-- Datum Seçimi -->
+                    <div>
+                        <label class="block text-[10px] font-semibold text-gray-600 mb-1">DATUM</label>
+                        <select id="datumSelect" onchange="updateProjectionUI()" class="w-full p-2 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 outline-none">
+                            <option value="WGS84">WGS84 (ITRF)</option>
+                            <option value="ED50">ED50 (Türkiye)</option>
+                        </select>
+                    </div>
+
+                    <!-- Sistem Seçimi -->
+                    <div>
+                        <label class="block text-[10px] font-semibold text-gray-600 mb-1">SİSTEM</label>
+                        <select id="systemSelect" onchange="updateProjectionUI()" class="w-full p-2 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 outline-none">
+                            <option value="GEO">Coğrafi (Lat/Lon)</option>
+                            <option value="UTM_6">UTM (6 Derece)</option>
+                            <option value="TM_3">TM (3 Derece)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Dilim Seçimi (Dinamik) -->
+                <div id="zoneContainer" class="hidden">
+                    <label id="zoneLabel" class="block text-[10px] font-semibold text-gray-600 mb-1">DİLİM / DOM</label>
+                    <select id="zoneSelect" onchange="refreshData()" class="w-full p-2 border border-gray-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 outline-none">
+                        <!-- JS ile doldurulacak -->
+                    </select>
+                </div>
+            </div>
+
+            <!-- Liste Başlığı -->
+            <div class="p-3 border-b border-gray-100 bg-white flex justify-between items-center shadow-sm z-10">
+                <h2 class="font-semibold text-gray-700 flex items-center gap-2 text-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                    </svg>
+                    Koordinat Listesi
+                </h2>
+                <span id="pointCount" class="text-[10px] bg-gray-100 border border-gray-200 px-2 py-0.5 rounded-full text-gray-600">0 Veri</span>
+            </div>
+            
+            <!-- Liste Alanı -->
+            <div id="coordinatesList" class="flex-1 overflow-y-auto p-4 scroller space-y-2 bg-white text-sm">
+                <p class="text-xs text-gray-400 text-center mt-10">Henüz veri yüklenmedi.</p>
+            </div>
+            
+            <!-- Alt Butonlar -->
+            <div class="p-4 bg-gray-50 border-t border-gray-200 flex flex-col gap-2">
+                <button onclick="downloadAsTxt()" class="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white py-2.5 px-4 rounded-lg transition shadow-sm text-sm font-semibold">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4-4m0 0l-4 4m4-4v12" />
+                    </svg>
+                    TXT İndir (Seçili Format)
+                </button>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="copyToClipboard('formatted')" class="text-xs text-gray-600 bg-white border border-gray-300 hover:bg-gray-50 py-2 rounded transition">
+                        Seçiliyi Kopyala
+                    </button>
+                    <button onclick="copyToClipboard('raw')" class="text-xs text-blue-600 bg-white border border-blue-200 hover:bg-blue-50 py-2 rounded transition">
+                        Ham Veriyi Kopyala
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // --- PROJEKSİYON YÖNETİMİ ---
+
+        // Türkiye için gerekli projeksiyon tanımlarını dinamik oluşturacağız.
+        // ED50 -> WGS84 dönüşümü için yaklaşık 7 parametre (Türkiye Ortalaması)
+        // Kaynak: Yaygın kullanılan parametreler (-87, -98, -121...)
+        const ED50_PARAMS = "+ellps=intl +towgs84=-87,-98,-121,0,0,0,0 +units=m +no_defs";
+        const WGS84_PARAMS = "+datum=WGS84 +no_defs";
+
+        // HTML Elemanları
+        const datumSelect = document.getElementById('datumSelect');
+        const systemSelect = document.getElementById('systemSelect');
+        const zoneSelect = document.getElementById('zoneSelect');
+        const zoneContainer = document.getElementById('zoneContainer');
+        const zoneLabel = document.getElementById('zoneLabel');
+
+        // Sayfa yüklendiğinde arayüzü hazırla
+        window.onload = function() {
+            updateProjectionUI();
+        };
+
+        function updateProjectionUI() {
+            const system = systemSelect.value;
+            const currentZone = zoneSelect.value; // Mevcut seçimi korumaya çalış
+
+            zoneSelect.innerHTML = ""; // Temizle
+
+            if (system === 'GEO') {
+                zoneContainer.classList.add('hidden');
+            } else {
+                zoneContainer.classList.remove('hidden');
+                
+                if (system === 'UTM_6') {
+                    zoneLabel.textContent = "UTM ZON (6 DERECE)";
+                    // Türkiye Zonları: 35, 36, 37, 38
+                    [35, 36, 37, 38].forEach(z => {
+                        let opt = document.createElement('option');
+                        opt.value = z;
+                        opt.text = `Zone ${z} (${(z*6)-3}° - ${(z*6)+3}°)`;
+                        zoneSelect.add(opt);
+                    });
+                    // Varsayılan olarak Ankara (36) seçelim veya eskisini koruyalım
+                    if(currentZone >= 35 && currentZone <= 38) zoneSelect.value = currentZone;
+                    else zoneSelect.value = "36";
+
+                } else if (system === 'TM_3') {
+                    zoneLabel.textContent = "DİLİM ORTA MERİDYENİ (DOM - 3 DERECE)";
+                    // Türkiye DOM'ları: 27, 30, 33, 36, 39, 42, 45
+                    [27, 30, 33, 36, 39, 42, 45].forEach(dom => {
+                        let opt = document.createElement('option');
+                        opt.value = dom;
+                        opt.text = `DOM ${dom} (Dilim ${dom/3}?)`; // Dilim numarası bazen DOM/3 olabiliyor ama DOM kullanımı daha yaygın.
+                        zoneSelect.add(opt);
+                    });
+                    // Varsayılan DOM 30
+                    if([27, 30, 33, 36, 39, 42, 45].includes(parseInt(currentZone))) zoneSelect.value = currentZone;
+                    else zoneSelect.value = "30";
+                }
+            }
+            refreshData();
+        }
+
+        // Seçilen ayarlara göre Proj4 string'i üret
+        function getCurrentProjString() {
+            const datum = datumSelect.value;
+            const system = systemSelect.value;
+            const zone = zoneSelect.value;
+
+            let baseParams = (datum === 'ED50') ? ED50_PARAMS : WGS84_PARAMS;
+
+            if (system === 'GEO') {
+                // Sadece Datum farkı varsa (Lat/Lon)
+                if (datum === 'ED50') return `+proj=longlat ${baseParams}`;
+                return `+proj=longlat +datum=WGS84 +no_defs`; // Varsayılan
+            } 
+            else if (system === 'UTM_6') {
+                return `+proj=utm +zone=${zone} ${baseParams}`;
+            } 
+            else if (system === 'TM_3') {
+                // TM 3 Derece (Genelde k=1.0 alınır, UTM'deki 0.9996 yerine)
+                // False Easting = 500,000
+                return `+proj=tmerc +lat_0=0 +lon_0=${zone} +k=1 +x_0=500000 +y_0=0 ${baseParams}`;
+            }
+        }
+
+        function refreshData() {
+            if (parsedData.length > 0) updateListUI();
+        }
+
+        // --- HARİTA VE DOSYA İŞLEMLERİ ---
+        
+        const map = L.map('map').setView([39.9334, 32.8597], 6);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap'
+        }).addTo(map);
+
+        let geoLayer = null; 
+        let parsedData = []; 
+
+        const fileInput = document.getElementById('fileInput');
+        const fileNameDisplay = document.getElementById('fileName');
+        const mapOverlay = document.getElementById('map-overlay');
+        const listContainer = document.getElementById('coordinatesList');
+        const pointCountDisplay = document.getElementById('pointCount');
+
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            fileNameDisplay.textContent = file.name;
+            const reader = new FileReader();
+            reader.onload = function(e) { parseKML(e.target.result); };
+            reader.readAsText(file);
+        });
+
+        function parseKML(xmlString) {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xmlString, "text/xml");
+
+            if (geoLayer) map.removeLayer(geoLayer);
+            listContainer.innerHTML = '';
+            parsedData = [];
+            mapOverlay.style.display = 'none';
+
+            geoLayer = L.featureGroup().addTo(map);
+            const placemarks = xmlDoc.getElementsByTagName("Placemark");
+            
+            if (placemarks.length === 0) return alert("Placemark bulunamadı.");
+
+            for (let i = 0; i < placemarks.length; i++) {
+                const p = placemarks[i];
+                const name = getTagValue(p, "name") || `Nokta #${i+1}`;
+                processGeometry(p, name);
+            }
+
+            if (parsedData.length > 0) {
+                const bounds = geoLayer.getBounds();
+                if (bounds.isValid()) map.fitBounds(bounds, { padding: [50, 50] });
+                updateListUI();
+            } else {
+                alert("Koordinat bulunamadı.");
+            }
+        }
+
+        function getTagValue(parent, tagName) {
+            const tag = parent.getElementsByTagName(tagName)[0];
+            return tag ? tag.textContent.trim() : null;
+        }
+
+        function processGeometry(placemark, name) {
+            // Point
+            const point = placemark.getElementsByTagName("Point")[0];
+            if (point) {
+                const [lon, lat] = parseFirstCoord(point);
+                L.marker([lat, lon]).bindPopup(`<b>${name}</b>`).addTo(geoLayer);
+                parsedData.push({ type: 'Nokta', name, lat: lat, lon: lon });
+            }
+            // LineString
+            const line = placemark.getElementsByTagName("LineString")[0];
+            if (line) {
+                const latLngs = parseAllCoords(line);
+                L.polyline(latLngs, { color: 'blue' }).bindPopup(`<b>${name}</b>`).addTo(geoLayer);
+                parsedData.push({ type: 'Yol', name, lat: latLngs[0][0], lon: latLngs[0][1], count: latLngs.length });
+            }
+            // Polygon
+            const poly = placemark.getElementsByTagName("Polygon")[0];
+            if (poly) {
+                const outer = poly.getElementsByTagName("outerBoundaryIs")[0];
+                if(outer) {
+                    const latLngs = parseAllCoords(outer);
+                    L.polygon(latLngs, { color: 'red', fillColor: '#f03', fillOpacity: 0.3 }).bindPopup(`<b>${name}</b>`).addTo(geoLayer);
+                    parsedData.push({ type: 'Alan', name, lat: latLngs[0][0], lon: latLngs[0][1], count: latLngs.length });
+                }
+            }
+        }
+
+        function parseFirstCoord(el) {
+            const raw = el.getElementsByTagName("coordinates")[0].textContent.trim();
+            const parts = raw.split(',').map(Number); // lon, lat
+            return [parts[0], parts[1]];
+        }
+
+        function parseAllCoords(el) {
+            const raw = el.getElementsByTagName("coordinates")[0].textContent.trim();
+            return raw.split(/\s+/).map(pair => {
+                const parts = pair.split(',');
+                if (parts.length >= 2) return [parseFloat(parts[1]), parseFloat(parts[0])]; // lat, lon
+                return null;
+            }).filter(c => c);
+        }
+
+        // --- DÖNÜŞÜM VE UI ---
+
+        function getTransformed(lat, lon) {
+            const targetDef = getCurrentProjString();
+            const system = systemSelect.value;
+            const datum = datumSelect.value;
+
+            // Kaynak her zaman WGS84 (KML standardı)
+            // proj4(source, dest, coordinates)
+            // Source: WGS84
+            const result = proj4(proj4.defs('EPSG:4326'), targetDef, [lon, lat]);
+
+            let x = result[0];
+            let y = result[1];
+            
+            // Eğer sistem GEO ise X=Lon, Y=Lat olur, etiketleri düzeltelim
+            if (system === 'GEO') {
+                // ED50 Coğrafi seçilirse sıra değişebilir ama genelde lon, lat döner
+                // Biz kullanıcıya Lat, Lon gösterelim
+                return { x: y, y: x, labelX: 'Enlem', labelY: 'Boylam', isMetric: false };
+            }
+
+            return { x: x, y: y, labelX: 'Sağa (Y)', labelY: 'Yukarı (X)', isMetric: true };
+        }
+
+        function updateListUI() {
+            pointCountDisplay.textContent = `${parsedData.length} Öğe`;
+            
+            let html = '';
+            parsedData.forEach((data, index) => {
+                const t = getTransformed(data.lat, data.lon);
+                
+                let val1 = t.isMetric ? t.x.toFixed(2) : t.x.toFixed(7);
+                let val2 = t.isMetric ? t.y.toFixed(2) : t.y.toFixed(7);
+
+                html += `
+                    <div class="bg-gray-50 border border-gray-200 rounded p-2 hover:bg-blue-50 cursor-pointer" onclick="zoomToItem(${index})">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="font-bold text-gray-700 truncate w-32">${data.name}</span>
+                            <span class="text-[10px] uppercase text-gray-400 bg-white px-1 border rounded">${data.type}</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs font-mono text-gray-600">
+                            <div><span class="text-gray-400">${t.labelX}:</span> ${val1}</div>
+                            <div><span class="text-gray-400">${t.labelY}:</span> ${val2}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            listContainer.innerHTML = html;
+        }
+
+        function zoomToItem(index) {
+            const layers = geoLayer.getLayers();
+            if (layers[index]) {
+                const layer = layers[index];
+                if (layer.getBounds) map.fitBounds(layer.getBounds());
+                else map.setView(layer.getLatLng(), 15);
+                layer.openPopup();
+            }
+        }
+
+        function downloadAsTxt() {
+            if(parsedData.length === 0) return alert("Veri yok.");
+            
+            let content = "";
+            parsedData.forEach((data, index) => {
+                const t = getTransformed(data.lat, data.lon);
+                // Sade format: SIRA X Y
+                let val1 = t.isMetric ? t.x.toFixed(3) : t.x.toFixed(8);
+                let val2 = t.isMetric ? t.y.toFixed(3) : t.y.toFixed(8);
+                content += `${index + 1} ${val1} ${val2}\n`;
+            });
+
+            saveFile(content, "txt");
+        }
+
+        function saveFile(content, ext) {
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            
+            const d = datumSelect.value;
+            const s = systemSelect.value;
+            const z = zoneSelect.value;
+            const info = (s === 'GEO') ? `${d}_Geo` : `${d}_${s}_${z}`;
+            
+            link.href = url;
+            link.download = `koordinat_${info}_${new Date().toISOString().slice(0,10)}.${ext}`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function copyToClipboard(mode) {
+            if(parsedData.length === 0) return;
+            
+            let text = "";
+            if (mode === 'raw') {
+                text = JSON.stringify(parsedData, null, 2);
+            } else {
+                parsedData.forEach((data, index) => {
+                    const t = getTransformed(data.lat, data.lon);
+                    text += `${index+1}\t${t.x}\t${t.y}\n`;
+                });
+            }
+            
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            alert(mode === 'raw' ? "Ham veriler (WGS84) kopyalandı." : "Dönüştürülmüş veriler kopyalandı.");
+        }
+    </script>
+</body>
+</html>
